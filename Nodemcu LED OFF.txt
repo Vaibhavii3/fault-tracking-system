@@ -1,0 +1,48 @@
+//http://arduino.esp8266.com/stable/package_esp8266com_index.json
+//Search: esp8266
+#define BLYNK_PRINT Serial
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+const int LED_1=D3;
+const int LED_2=D4;
+// You should get Auth Token in the Blynk App.
+// Go to the Project Settings (nut icon).
+char auth[] = "nEUDCXumBp3eKpXEQd6ZkmyVsqblQ7Hi"; //Code send by blynk app to email
+
+// Your WiFi credentials.
+// Set password to "" for open networks.
+char ssid[] = "Xiaomi_802D";
+char pass[] = "LeadeRShip";
+BLYNK_WRITE(V1) //Curtain
+{
+  int pinValue1 = param.asInt(); // assigning incoming value from pin V1 to a variable
+  //Serial.println(pinValue1);
+  if(pinValue1==1)
+  {
+    digitalWrite(LED_1,HIGH);
+    Serial.println("LED 1 ON");
+    Blynk.virtualWrite(V0,"LED 1 IS ON"); 
+  }
+  if(pinValue1==0)
+  {
+    digitalWrite(LED_1,LOW);
+    Serial.println("LED 1 OFF");
+    Blynk.virtualWrite(V0,"LED 1 IS OFF"); 
+  }
+}
+void setup()
+{
+  // Debug console
+  Serial.begin(9600);
+  pinMode(LED_1,OUTPUT);
+  pinMode(LED_2,OUTPUT);
+  digitalWrite(LED_1,HIGH);
+  digitalWrite(LED_2,HIGH);
+  delay(2000);
+  Blynk.begin(auth, ssid, pass);
+}
+
+void loop()
+{
+  Blynk.run();
+}

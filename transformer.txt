@@ -1,0 +1,282 @@
+//LCD: RS=7,E=8,D4=9,D5=10,D6=11,D7=12
+//EF=13
+//Voltage=A0
+//Temp(Thermister)=A1
+//Current=A2
+//Controller Tx(3) to Nodemcu Rx(D6) via 3 1K Resistor
+//Controller Rx(2) to Nodemcu Tx(D5)
+//Relay=4
+#include<SoftwareSerial.h>
+#include<LiquidCrystal.h>
+LiquidCrystal lcd(7,8,9,10,11,12);
+SoftwareSerial Nmcu(2,3);
+const int EF=13;
+const int Volt=A0;
+const int Temp=A1;
+const int I=A2;
+const int Relay=4;
+boolean Estate;
+//Temperature sensor variable
+unsigned int Tstate;
+float R1 = 10000;
+float logR2, R2, T;
+float c1 = 1.009249522e-03, c2 = 2.378405444e-04, c3 = 2.019202697e-07;
+//Current Sensor Variable
+double Voltage = 0,AvVoltage=0;
+double VRMS = 0;
+double AmpsRMS = 0;
+//Voltage mesurment variable
+unsigned int Vstate;
+unsigned int Dec;
+unsigned long sum=0;
+float VL=0,m=0;
+//
+boolean Vbit=0,EFbit=0,Tbit=0,RONbit=0,ROFFbit=0,Ibit=0,OLbit=0;
+unsigned char OLcount=0,Icount=0;
+String str;
+void setup()
+{
+  Nmcu.begin(9600);
+  pinMode(EF,INPUT);
+  pinMode(Volt,INPUT);
+  pinMode(Temp,INPUT);
+  pinMode(I,INPUT);
+  pinMode(Relay,OUTPUT);
+  digitalWrite(Relay,HIGH);
+  lcd.begin(20,4);
+  lcd.setCursor(0,0);
+  lcd.print("V:       ,EF:"); //(2,0),(13,0)
+  lcd.setCursor(0,1);
+  lcd.print("I:       ,T:"); //(2,1),(12,1)
+  lcd.setCursor(0,2);
+  lcd.print("TRANSFORMER:"); //(12,2)
+  lcd.setCursor(0,3);
+  lcd.print("V:   ,I:   ,T:"); //(2,3),(8,3),(14,3)
+}
+void loop()
+{
+  Again:
+  Measure_Voltage();
+  if(Vbit==1)  //If Normal voltage
+  Earth_Fault();
+  else         //If Over voltage or Under voltage
+  {
+   Relay_OFF();
+   goto Again;
+  }
+  if(EFbit==1)  //If No Earth fault
+  {
+    Relay_ON();
+    Measure_Temp();
+  }
+  else  //If Earth Fault occur
+  {
+   Relay_OFF();
+   goto Again;
+  }
+  if(Tbit==1)  //If Temperature is Normal
+  MeasureCurrent();
+  else  //If Over Temperature
+  {
+   Relay_OFF();
+   goto Again;
+  }
+  if(Ibit==1) //If Current is Normal
+  {
+    str = String("V= ")+String(VL)+String("I= ")+String(AmpsRMS);
+    Nmcu.println(str);
+    delay(1000);
+    goto Again;
+  }
+  else  //If Over load
+  {
+    OLcount++;
+    if(OLcount==3)
+    {
+      OLbit=1;
+    }
+    Relay_OFF();
+    goto Again;
+  }
+}
+//************************************* Earth_Fault_Test() *************************//
+void Earth_Fault()
+{
+  Estate=digitalRead(EF);
+  lcd.setCursor(13,0);
+  if(Estate==HIGH)
+  {
+    lcd.print("  EF");
+    EFbit=0;
+  }
+  else
+  {
+    lcd.print("N_EF");
+    EFbit=1;
+  }
+  delay(1000);
+}
+//************************************* Relay_ON() *************************//
+void Relay_ON()
+{
+  if(RONbit==0 && OLbit==0)
+  {
+   ROFFbit=0;
+   lcd.setCursor(12,2);
+   lcd.print("ON ");
+   digitalWrite(Relay,LOW);
+   delay(1000);
+   RONbit=1;
+  }
+}
+//************************************* Relay_OFF() *************************//
+void Relay_OFF()
+{
+  if(ROFFbit==0)
+  {
+   RONbit=0;
+   lcd.setCursor(12,2);
+   lcd.print("OFF");
+   digitalWrite(Relay,HIGH);
+   delay(1000);
+   ROFFbit=1;
+  }
+}
+//*************************************  Measure_Temp *************************//
+void Measure_Temp()
+{
+  Tstate = analogRead(Temp);
+  R2 = R1 * (1023.0 / (float)Tstate - 1.0);
+  logR2 = log(R2);
+  T = (1.0 / (c1 + c2*logR2 + c3*logR2*logR2*logR2));
+  T = T - 273.15;
+ // T = (T * 9.0)/ 5.0 + 32.0; //celsius to fahrenheit
+  lcd.setCursor(12,1);
+  lcd.print(T);   
+  lcd.print(" C");
+  lcd.setCursor(14,3);
+  if(T>=40)
+  {
+   lcd.print("OT"); 
+   Tbit=0; 
+  }
+  else
+  {
+   lcd.print("NT");
+   Tbit=1;
+  }
+  delay(1000); 
+}
+//*************************************  MeasureCurrent *************************//
+void MeasureCurrent()
+{
+  Imeasure:
+  for(char k=0;k<2;k++)
+  {
+   Voltage = getVPP();
+   AvVoltage=(AvVoltage+Voltage);
+  }
+  Voltage=(AvVoltage/2.0);
+  //Serial.println(Voltage,3);
+  AvVoltage=0;
+  //Serial.print('\t');
+  VRMS = (Voltage/2.0) *0.707; 
+  VRMS = (VRMS-0.0025);
+  if((VRMS>0 && VRMS<0.007) || VRMS<0)
+  VRMS=0;
+  //Serial.println(VRMS,3);
+  //Serial.print('\t');
+  AmpsRMS = (VRMS*20.0); //I=(VRMS*2000)/R, R=100R
+  if(AmpsRMS>=1)
+  {
+    delay(1500);
+    Icount++;
+    if(Icount<=2)
+    goto Imeasure;
+  }
+  lcd.setCursor(2,1);
+  lcd.print(AmpsRMS,3);
+  if(AmpsRMS>=1)
+  {
+    lcd.setCursor(8,3);
+    lcd.print("OL");
+    Ibit=0;
+    Icount=0;
+  }
+  else
+  {
+    lcd.setCursor(8,3);
+    lcd.print("NL");
+    Ibit=1;
+  }
+  //Serial.print(AmpsRMS,3);
+  //Serial.print('\n');
+  delay(1000);
+}
+float getVPP()
+{
+  float result;
+  int readValue;             //value read from the sensor
+  int maxValue = 0;          // store max value here
+  int minValue = 1024;          // store min value here
+  
+   uint32_t start_time = millis();
+   while((millis()-start_time) < 1000) //sample for 1 Sec
+   {
+       readValue = analogRead(I);
+       // see if you have a new maxValue
+       if (readValue > maxValue) 
+       {
+           /*record the maximum sensor value*/
+           maxValue = readValue;
+       }
+       if (readValue < minValue) 
+       {
+           /*record the maximum sensor value*/
+           minValue = readValue;
+       }
+   }
+   
+   // Subtract min from max
+   result = ((maxValue - minValue) * 5.0)/1024.0;
+      
+   return result;
+ }
+//***************************************************** Measure_Voltage *****************//
+void Measure_Voltage()
+{
+  for(int i=0;i<100;i++)
+  {
+   Vstate=analogRead(Volt);
+   sum=sum+Vstate;
+  }
+  Dec=(sum/100.0);
+  sum=0;
+  VL=((Dec*315.0)/(1024.0));
+  if(VL!=m)
+  {
+   lcd.setCursor(2,0);
+   lcd.print(VL,2);
+   m=VL;
+  }
+  if(VL>=250 || VL<=180)
+  {
+    lcd.setCursor(2,3);
+    if(VL>=250)
+    {
+      lcd.print("OV");
+    }
+    else if(VL<=180)
+    {
+      lcd.print("UV");
+    }
+    Vbit=0;
+  }
+  else
+  {
+    lcd.setCursor(2,3);
+    lcd.print("NV");
+    Vbit=1;
+  } 
+  delay(1000);
+}
